@@ -81,6 +81,13 @@ function httpHandler(req, pathname) {
 
 	const reqHdrNew = new Headers(reqHdrRaw)
 
+	// 修改Accept-Language请求头，将zh-CN替换为zh-SG
+	if (reqHdrNew.has('accept-language')) {
+		const acceptLanguage = reqHdrNew.get('accept-language')
+		const modifiedAcceptLanguage = acceptLanguage.replace('zh-CN', 'zh-SG')
+		reqHdrNew.set('accept-language', modifiedAcceptLanguage)
+	}
+
 	let urlStr = pathname
 	let flag = !Boolean(whiteList.length) // 如果白名单为空，默认允许
 	for (let i of whiteList) {
