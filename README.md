@@ -1,4 +1,4 @@
-# 📦 CF-Workers-GitHub
+# 🚂 CF-Workers-GitHub
 ![img](./img.png)
 ## 📝 简介
 github release、archive以及项目文件的加速项目，支持clone，Cloudflare Workers & Pages 版本
