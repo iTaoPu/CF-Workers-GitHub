@@ -486,7 +486,7 @@ async function githubInterface() {
 			</a>
 			
 			<div class="container">
-				<h1 class="title"><span class="emoji">📦</span>GitHub 文件加速</h1>
+				<h1 class="title"><span class="emoji">🚂</span>GitHub 文件加速 - 公益服务</h1>
 				
 				<form onsubmit="toSubmit(event)" class="search-container">
 					<input 
