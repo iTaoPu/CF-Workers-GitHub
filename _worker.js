@@ -195,14 +195,14 @@ export default {
 			return httpHandler(request, path) // 处理符合正则的请求
 		} else if (path.search(exp2) === 0) {
 			if (Config.jsdelivr) {
-				const newUrl = path.replace('/blob/', '@').replace(/^(?:https?:\/\/)?github\.com/, 'https://cdn.jsdelivr.net/gh') // 使用jsDelivr镜像
+				const newUrl = path.replace('/blob/', '@').replace(/^(?:https?:\/\/)?github\.com/, 'https://fastly.jsdelivr.net/gh') // 使用jsDelivr镜像
 				return Response.redirect(newUrl, 302) // 重定向到jsDelivr
 			} else {
 				path = path.replace('/blob/', '/raw/') // 修改路径为raw
 				return httpHandler(request, path) // 处理修改后的请求
 			}
 		} else if (path.search(exp4) === 0) {
-			const newUrl = path.replace(/(?<=com\/.+?\/.+?)\/(.+?\/)/, '@$1').replace(/^(?:https?:\/\/)?raw\.(?:githubusercontent|github)\.com/, 'https://cdn.jsdelivr.net/gh') // 修改为jsDelivr镜像URL
+			const newUrl = path.replace(/(?<=com\/.+?\/.+?)\/(.+?\/)/, '@$1').replace(/^(?:https?:\/\/)?raw\.(?:githubusercontent|github)\.com/, 'https://fastly.jsdelivr.net/gh') // 修改为jsDelivr镜像URL
 			return Response.redirect(newUrl, 302) // 重定向到新的URL
 		} else {
 			if (env.URL302) {
@@ -477,7 +477,7 @@ async function githubInterface() {
 			</style>
 		</head>
 		<body>
-			<a href="https://github.com/iTaoPu/CF-Workers-GitHub" target="_blank" class="github-corner" aria-label="View source on Github">
+			<a target="_blank" class="github-corner" aria-label="View source on Github">
 				<svg viewBox="0 0 250 250" aria-hidden="true">
 					<path d="M0,0 L115,115 L130,115 L142,142 L250,250 L250,0 Z"></path>
 					<path d="M128.3,109.0 C113.8,99.7 119.0,89.6 119.0,89.6 C122.0,82.7 120.5,78.6 120.5,78.6 C119.2,72.0 123.4,76.3 123.4,76.3 C127.3,80.9 125.5,87.3 125.5,87.3 C122.9,97.6 130.6,101.9 134.4,103.2" fill="currentColor" style="transform-origin: 130px 106px;" class="octo-arm"></path>
@@ -486,7 +486,7 @@ async function githubInterface() {
 			</a>
 			
 			<div class="container">
-				<h1 class="title"><span class="emoji">🚂</span>GitHub 文件加速 - 公益服务</h1>
+				<h1 class="title"><span class="emoji">🚂</span>GitHub 文件加速 · 公益服务</h1>
 				
 				<form onsubmit="toSubmit(event)" class="search-container">
 					<input 
@@ -505,20 +505,10 @@ async function githubInterface() {
 				</form>
 
 				<div class="tips">
-					<p>✨ 支持带协议头(https://)或不带的GitHub链接，更多用法见<a href="https://hunsh.net/archives/23/">文档说明</a></p>
-					<p>🚀 release、archive使用cf加速，文件会跳转至JsDelivr</p>
+					<p>✨ 支持带协议头(https://)或者不带协议头的GitHub链接</p>
+					<p>🚀 release、archive使用Cloudflare加速，文件会跳转至JsDelivr</p>
 					<p>⚠️ 注意：暂不支持文件夹下载</p>
 				</div>
-
-				<div class="example">
-					<div class="example-title">📃 合法输入示例：</div>
-					<p>📄 分支源码：<span class="url-part">github.com/hunshcn/project/archive/master.zip</span></p>
-					<p>📁 release源码：<span class="url-part">github.com/hunshcn/project/archive/v0.1.0.tar.gz</span></p>
-					<p>📂 release文件：<span class="url-part">github.com/hunshcn/project/releases/download/v0.1.0/example.zip</span></p>
-					<p>💾 commit文件：<span class="url-part">github.com/hunshcn/project/blob/123/filename</span></p>
-					<p>🖨️ gist：<span class="url-part">gist.githubusercontent.com/cielpy/123/raw/cmd.py</span></p>
-				</div>
-			</div>
 
 			<script>
 				function toSubmit(e) {
