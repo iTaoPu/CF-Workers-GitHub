@@ -402,6 +402,29 @@ async function githubInterface() {
 					.example p { font-size: 0.85rem; padding-left: 0.8rem; margin: 0.7rem 0; }
 					.example-title { font-size: 0.95rem; padding-bottom: 0.6rem; }
 					.github-corner svg { width: 60px; height: 60px; }
+
+					/* 移动端：按钮在输入框下方左侧，间距调整为1rem（与标题下边距一致） */
+					.link-box {
+						flex-direction: column !important;
+						align-items: flex-start !important;
+						gap: 1rem;
+					}
+					.link-box input {
+						width: 100% !important;
+						height: 44px !important;
+						flex: none !important;
+					}
+					.copy-btn {
+						height: 40px;
+						padding: 0 16px;
+						font-size: 0.85rem;
+						align-self: flex-start !important;
+						margin-left: 0 !important;
+					}
+					.copy-btn svg {
+						width: 14px;
+						height: 14px;
+					}
 				}
 
 				.converted-link-container {
@@ -471,16 +494,6 @@ async function githubInterface() {
 					fill: currentColor;
 				}
 
-				.copy-success {
-					color: #4caf50;
-					font-size: 0.9rem;
-					margin-left: 10px;
-					opacity: 0;
-					transition: opacity 0.2s;
-				}
-
-				.copy-success.show { opacity: 1; }
-
 				/* 版权样式 - 增加上边距，使版权信息更靠下 */
 				.copyright {
 					text-align: center;
@@ -536,7 +549,6 @@ async function githubInterface() {
 							复制
 						</button>
 					</div>
-					<div id="copy-success" class="copy-success">✓ 已复制</div>
 				</div>
 
 				<!-- 版权信息 - 已增加上边距，视觉上更靠下 -->
@@ -549,7 +561,9 @@ async function githubInterface() {
 				const prefix = '${PREFIX}';
 				const inputField = document.getElementById('github-url');
 				const convertedInput = document.getElementById('converted-link');
-				const copySuccess = document.getElementById('copy-success');
+
+				// 复制按钮状态定时器
+				let copyTimer = null;
 
 				inputField.addEventListener('input', function() {
 					let url = this.value.trim();
@@ -570,10 +584,24 @@ async function githubInterface() {
 					convertedInput.select();
 					convertedInput.setSelectionRange(0, 99999);
 					navigator.clipboard.writeText(convertedInput.value).then(() => {
-						copySuccess.classList.add('show');
-						setTimeout(() => {
-							copySuccess.classList.remove('show');
-						}, 2000);
+						// 清除之前的定时器
+						if (copyTimer) clearTimeout(copyTimer);
+
+						// 更改按钮文本为“已复制”（保留原图标）
+						const copyBtn = document.getElementById('copy-btn');
+						// 保存原始内容（仅在第一次时）
+						if (!copyBtn.hasAttribute('data-original')) {
+							copyBtn.setAttribute('data-original', copyBtn.innerHTML);
+						}
+						// 构建“已复制”内容（使用相同的SVG，文字改为“已复制”）
+						const originalSvg = copyBtn.querySelector('svg').outerHTML; // 获取SVG的HTML
+						copyBtn.innerHTML = originalSvg + ' 已复制';
+
+						// 设置定时器恢复，5秒后恢复
+						copyTimer = setTimeout(() => {
+							copyBtn.innerHTML = copyBtn.getAttribute('data-original');
+							copyTimer = null;
+						}, 5000); // 修改为5000毫秒（5秒）
 					}).catch(err => {
 						alert('复制失败，请手动复制');
 					});
