@@ -4,14 +4,14 @@
 github release、archive以及项目文件的加速项目，支持clone，Cloudflare Workers & Pages 版本
 
 > [!CAUTION]
-> **Github.fxxk.dedyn.io 已被GFW污染，生产环境建议自行部署服务。**
+> **https://cdn.ugreen.hidns.co 网页演示**
 
 > [!WARNING]
 > 项目可能会触发**疑似钓鱼网站**警告或域名封禁，请通过环境变量 `URL` 赋值 **nginx** 或 `URL302` 设置302跳转域名进行伪装。
 
 ## 🚀 使用
 
-直接在copy出来的url前加`https://github.fxxk.dedyn.io/`即可
+直接在copy出来的url前加`https://cdn.ugreen.hidns.co/`即可
 
 也可以直接访问，在input输入
 
@@ -61,3 +61,4 @@ github release、archive以及项目文件的加速项目，支持clone，Cloudf
 
 # 🙏 致谢
 [gh-proxy](https://github.com/hunshcn/gh-proxy)、[jsproxy](https://github.com/EtherDream/jsproxy/)
+
