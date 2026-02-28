@@ -4,7 +4,7 @@
 github release、archive以及项目文件的加速项目，支持clone，Cloudflare Workers & Pages 版本
 
 > [!CAUTION]
-> **https://cdn.ugreen.hidns.co 网页演示**
+> **https://cdn.ugreen.hidns.co 演示网站，只是作为演示之用，具体请自行部署**
 
 > [!WARNING]
 > 项目可能会触发**疑似钓鱼网站**警告或域名封禁，请通过环境变量 `URL` 赋值 **nginx** 或 `URL302` 设置302跳转域名进行伪装。
@@ -61,4 +61,5 @@ github release、archive以及项目文件的加速项目，支持clone，Cloudf
 
 # 🙏 致谢
 [gh-proxy](https://github.com/hunshcn/gh-proxy)、[jsproxy](https://github.com/EtherDream/jsproxy/)
+
 
