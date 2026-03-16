@@ -4,9 +4,11 @@ let 屏蔽爬虫UA = ['netcraft'];
 
 // 前缀，如果自定义路由为example.com/gh/*，将PREFIX改为 '/gh/'，注意，少一个杠都会错！
 const PREFIX = '/' // 路由前缀
-// 分支文件使用jsDelivr镜像的开关，0为关闭，默认开启以隐藏 raw 域名
-const Config = {
-	jsdelivr: 1 // 配置是否使用jsDelivr镜像（1为开启）
+
+// 默认配置，可通过环境变量覆盖
+const DEFAULT_CONFIG = {
+	jsdelivr: 1, // 是否使用 jsDelivr 镜像
+	jsdelivr_cdns: ['fastly.jsdelivr.net', 'cdn.jsdelivr.net'] // CDN 列表
 }
 
 const whiteList = [] // 白名单，路径中包含白名单字符的请求才会通过，例如 ['/username/']
@@ -21,31 +23,65 @@ const PREFLIGHT_INIT = {
 	}),
 }
 
-const exp1 = /^(?:https?:\/\/)?github\.com\/.+?\/.+?\/(?:releases|archive)\/.*$/i
-const exp2 = /^(?:https?:\/\/)?github\.com\/.+?\/.+?\/(?:blob|raw)\/.*$/i
-const exp3 = /^(?:https?:\/\/)?github\.com\/.+?\/.+?\/(?:info|git-).*$/i
-const exp4 = /^(?:https?:\/\/)?raw\.(?:githubusercontent|github)\.com\/.+/i
-const exp5 = /^(?:https?:\/\/)?gist\.(?:githubusercontent|github)\.com\/.+?\/.+?\/.+$/i
-const exp6 = /^(?:https?:\/\/)?github\.com\/.+?\/.+?\/tags.*$/i
-
-function makeRes(body, status = 200, headers = {}) {
-	headers['access-control-allow-origin'] = '*'
-	return new Response(body, { status, headers })
+// 预编译正则表达式
+const REGEXPS = {
+	exp1: /^(?:https?:\/\/)?github\.com\/.+?\/.+?\/(?:releases|archive)\/.*$/i,
+	exp2: /^(?:https?:\/\/)?github\.com\/.+?\/.+?\/(?:blob|raw)\/.*$/i,
+	exp3: /^(?:https?:\/\/)?github\.com\/.+?\/.+?\/(?:info|git-).*$/i,
+	exp4: /^(?:https?:\/\/)?raw\.(?:githubusercontent|github)\.com\/.+/i,
+	exp5: /^(?:https?:\/\/)?gist\.(?:githubusercontent|github)\.com\/.+?\/.+?\/.+$/i,
+	exp6: /^(?:https?:\/\/)?github\.com\/.+?\/.+?\/tags.*$/i
 }
 
 function newUrl(urlStr) {
 	try {
 		return new URL(urlStr)
-	} catch (err) {
+	} catch {
 		return null
 	}
 }
 
 function checkUrl(u) {
-	for (let i of [exp1, exp2, exp3, exp4, exp5, exp6]) {
-		if (u.search(i) === 0) return true
+	for (let exp of Object.values(REGEXPS)) {
+		if (u.search(exp) === 0) return true
 	}
 	return false
+}
+
+// 基于路径的哈希函数，用于选择稳定的CDN
+function hashString(str) {
+	let hash = 0;
+	for (let i = 0; i < str.length; i++) {
+		hash = ((hash << 5) - hash) + str.charCodeAt(i);
+		hash |= 0;
+	}
+	return Math.abs(hash);
+}
+
+function selectCdnByPath(path, cdns) {
+	if (!cdns || cdns.length === 0) {
+		return 'fastly.jsdelivr.net'; // 默认值
+	}
+	const hash = hashString(path);
+	const index = hash % cdns.length;
+	return cdns[index];
+}
+
+// 将 GitHub blob/raw 链接转换为 jsDelivr 链接（优化点2：合并正则）
+function convertToJsDelivr(urlStr, cdns) {
+	const url = newUrl(urlStr);
+	if (!url) return null;
+
+	// 分离路径和查询参数
+	const basePath = url.origin + url.pathname;
+	const query = url.search;
+	const cdnDomain = selectCdnByPath(basePath, cdns);
+
+	// 合并正则，同时替换 /blob/ 或 /raw/
+	let newBase = basePath.replace(/\/(blob|raw)\//, '@')
+		.replace(/^(?:https?:\/\/)?github\.com/, `https://${cdnDomain}/gh`);
+
+	return newBase + query;
 }
 
 function httpHandler(req, pathname) {
@@ -54,7 +90,16 @@ function httpHandler(req, pathname) {
 		return new Response(null, PREFLIGHT_INIT)
 	}
 
-	const reqHdrNew = new Headers(reqHdrRaw)
+	// 过滤隐私请求头，使用 append 保留多值头（优化点3）
+	const reqHdrNew = new Headers()
+	const privacyHeaders = ['cookie', 'authorization', 'proxy-authorization']
+	for (let [key, value] of reqHdrRaw) {
+		const lowerKey = key.toLowerCase()
+		if (!privacyHeaders.includes(lowerKey)) {
+			reqHdrNew.append(key, value) // 使用 append
+		}
+	}
+
 	let urlStr = pathname
 	let flag = !whiteList.length
 	for (let i of whiteList) {
@@ -65,10 +110,13 @@ function httpHandler(req, pathname) {
 	}
 	if (!flag) return new Response("blocked", { status: 403 })
 
-	if (urlStr.search(/^https?:\/\//) !== 0) {
+	if (!/^https?:\/\//i.test(urlStr)) {
 		urlStr = 'https://' + urlStr
 	}
 	const urlObj = newUrl(urlStr)
+	if (!urlObj) {
+		return new Response('Invalid URL', { status: 400 })
+	}
 	const reqInit = {
 		method: req.method,
 		headers: reqHdrNew,
@@ -86,35 +134,38 @@ async function proxy(urlObj, reqInit, redirectCount = 0) {
 
 	let res
 	try {
-		res = await fetch(urlObj.href, reqInit)
+		res = await fetch(urlObj.href, {
+			...reqInit,
+			cf: { cacheTtl: 3600 } // Cloudflare 缓存优化
+		})
 	} catch (err) {
+		// 区分错误类型
+		if (err.name === 'FetchError' && err.message.includes('NetworkError')) {
+			return new Response('Network error', { status: 504 })
+		}
 		return new Response(`Fetch failed: ${err.message}`, { status: 502 })
 	}
 
 	const resHdrOld = res.headers
 	const resHdrNew = new Headers()
 
-	// 只保留客户端可能需要的标准头，其余全部丢弃
 	const allowedHeaders = [
-		'content-type',
-		'content-length',
-		'content-disposition',
-		'content-encoding',
-		'content-range',
-		'accept-ranges',
-		'etag',
-		'last-modified',
-		'cache-control',
-		'expires',
-		'pragma',
-		'set-cookie',
+		'content-type', 'content-length', 'content-disposition',
+		'content-encoding', 'content-range', 'accept-ranges',
+		'etag', 'last-modified', 'cache-control', 'expires',
+		'pragma', 'set-cookie',
 	]
 
-	for (let [key, value] of resHdrOld.entries()) {
+	for (let [key, value] of resHdrOld) {
 		const lowerKey = key.toLowerCase()
 		if (allowedHeaders.includes(lowerKey) && lowerKey !== 'location') {
 			resHdrNew.append(key, value)
 		}
+	}
+
+	// 添加缓存控制（如果上游未提供）
+	if (!resHdrNew.has('cache-control')) {
+		resHdrNew.set('cache-control', 'public, max-age=3600')
 	}
 
 	const status = res.status
@@ -122,6 +173,14 @@ async function proxy(urlObj, reqInit, redirectCount = 0) {
 	// 处理重定向
 	if (resHdrOld.has('location')) {
 		let _location = resHdrOld.get('location')
+		if (!/^https?:\/\//i.test(_location)) {
+			try {
+				const base = urlObj.href;
+				_location = new URL(_location, base).href;
+			} catch {
+				return new Response(`Invalid redirect location: ${_location}`, { status: 502 });
+			}
+		}
 		if (checkUrl(_location)) {
 			resHdrNew.set('location', PREFIX + _location)
 		} else {
@@ -142,53 +201,89 @@ async function proxy(urlObj, reqInit, redirectCount = 0) {
 export default {
 	async fetch(request, env, ctx) {
 		const url = new URL(request.url)
-		const urlObj = new URL(request.url)
 
-		if (env.UA) 屏蔽爬虫UA = 屏蔽爬虫UA.concat(await ADD(env.UA))
-		const userAgentHeader = request.headers.get('User-Agent')
-		const userAgent = userAgentHeader ? userAgentHeader.toLowerCase() : "null"
+		// 合并环境变量配置
+		const config = {
+			jsdelivr: env.JSDELIVR !== undefined ? parseInt(env.JSDELIVR) : DEFAULT_CONFIG.jsdelivr,
+			jsdelivr_cdns: env.JSDELIVR_CDNS ? env.JSDELIVR_CDNS.split(',').map(s => s.trim()) : DEFAULT_CONFIG.jsdelivr_cdns
+		}
+
+		if (env.UA) 屏蔽爬虫UA = 屏蔽爬虫UA.concat(env.UA.split(',').map(s => s.trim()).filter(s => s))
+		const userAgent = (request.headers.get('User-Agent') || '').toLowerCase()
 		if (屏蔽爬虫UA.some(fxxk => userAgent.includes(fxxk)) && 屏蔽爬虫UA.length > 0) {
 			return new Response(await nginx(), {
 				headers: { 'Content-Type': 'text/html; charset=UTF-8' }
 			})
 		}
 
-		let path = urlObj.searchParams.get('q')
+		let path = url.searchParams.get('q')
 		if (path) {
-			return Response.redirect('https://' + urlObj.host + PREFIX + path, 301)
-		} else if (url.pathname.toLowerCase() == '/favicon.ico') {
+			return Response.redirect('https://' + url.host + PREFIX + path, 301)
+		}
+		if (url.pathname.toLowerCase() === '/favicon.ico') {
 			return Response.redirect('https://cdn.jsdmirror.com/gh/iTaoPu/CF-Workers-GitHub@main/jsdelivr.ico', 302)
 		}
 
-		path = urlObj.href.substr(urlObj.origin.length + PREFIX.length).replace(/^https?:\/+/, 'https://')
+		// 提取目标路径
+		let targetPath = url.href.slice(url.origin.length + PREFIX.length).replace(/^https?:\/+/, 'https://')
+		
+		// 如果路径为空，直接显示首页
+		if (!targetPath) {
+			return new Response(await githubInterface(PREFIX), {
+				headers: { 'Content-Type': 'text/html; charset=UTF-8' }
+			})
+		}
 
-		// 优先处理 raw 和 blob 的 jsDelivr 重定向
-		if (path.search(exp2) === 0) {
-			if (Config.jsdelivr) {
-				const newUrl = path.replace('/blob/', '@').replace(/^(?:https?:\/\/)?github\.com/, 'https://fastly.jsdelivr.net/gh')
-				return Response.redirect(newUrl, 302)
+		// 补全协议，确保 newUrl 能正确解析（修复无协议路径问题）
+		if (!/^https?:\/\//i.test(targetPath)) {
+			targetPath = 'https://' + targetPath
+		}
+
+		const targetUrl = newUrl(targetPath)
+		if (!targetUrl) {
+			// 无效 URL，显示首页（更友好）
+			return new Response(await githubInterface(PREFIX), {
+				headers: { 'Content-Type': 'text/html; charset=UTF-8' }
+			})
+		}
+
+		// 路由匹配
+		const fullTarget = targetUrl.href
+		if (REGEXPS.exp2.test(fullTarget)) {
+			if (config.jsdelivr) {
+				const jsdelivrUrl = convertToJsDelivr(fullTarget, config.jsdelivr_cdns)
+				// 优化点4：转换失败时返回错误页面，而非回退代理
+				if (!jsdelivrUrl) {
+					return new Response('无法转换为 jsDelivr 链接，请检查 URL 格式', { status: 400 })
+				}
+				return Response.redirect(jsdelivrUrl, 302)
 			} else {
-				path = path.replace('/blob/', '/raw/')
-				return httpHandler(request, path)
+				// 将 blob 转换为 raw
+				const rawUrl = fullTarget.replace('/blob/', '/raw/')
+				return httpHandler(request, rawUrl)
 			}
-		} else if (path.search(exp4) === 0) {
-			// 直接代理 raw 内容，不重定向到 jsDelivr
-			return httpHandler(request, path)
-		} else if (path.search(exp1) === 0 || path.search(exp5) === 0 || path.search(exp6) === 0 || path.search(exp3) === 0) {
-			return httpHandler(request, path)
+		} else if (REGEXPS.exp4.test(fullTarget)) {
+			return httpHandler(request, fullTarget)
+		} else if (REGEXPS.exp1.test(fullTarget) || REGEXPS.exp5.test(fullTarget) || REGEXPS.exp6.test(fullTarget) || REGEXPS.exp3.test(fullTarget)) {
+			return httpHandler(request, fullTarget)
 		} else {
+			// 回退处理（优化点1：保留路径和查询）
 			if (env.URL302) {
 				return Response.redirect(env.URL302, 302)
 			} else if (env.URL) {
-				if (env.URL.toLowerCase() == 'nginx') {
+				if (env.URL.toLowerCase() === 'nginx') {
 					return new Response(await nginx(), {
 						headers: { 'Content-Type': 'text/html; charset=UTF-8' }
 					})
 				} else {
-					return fetch(new Request(env.URL, request))
+					// 拼接原始请求的路径和查询参数，避免丢失
+					const target = new URL(env.URL)
+					target.pathname = url.pathname
+					target.search = url.search
+					return fetch(new Request(target.href, request))
 				}
 			} else {
-				return new Response(await githubInterface(), {
+				return new Response(await githubInterface(PREFIX), {
 					headers: { 'Content-Type': 'text/html; charset=UTF-8' }
 				})
 			}
@@ -196,7 +291,7 @@ export default {
 	}
 }
 
-async function githubInterface() {
+async function githubInterface(prefix) {
 	const html = `
 		<!DOCTYPE html>
 		<html lang="zh-CN">
@@ -559,10 +654,10 @@ async function githubInterface() {
 			</div>
 
 			<script>
-				const prefix = '${PREFIX}';
+				const prefix = '${prefix}';
 				const inputField = document.getElementById('github-url');
 				const convertedInput = document.getElementById('converted-link');
-				let copyTimer = null; // 复制按钮恢复定时器
+				let copyTimer = null;
 
 				inputField.addEventListener('input', function() {
 					let url = this.value.trim();
@@ -585,26 +680,21 @@ async function githubInterface() {
 					convertedInput.select();
 					convertedInput.setSelectionRange(0, 99999);
 					navigator.clipboard.writeText(convertedInput.value).then(() => {
-						// 清除之前的定时器
 						if (copyTimer) clearTimeout(copyTimer);
 
-						// 保存原始内容（仅第一次）
 						if (!copyBtn.hasAttribute('data-original')) {
 							copyBtn.setAttribute('data-original', copyBtn.innerHTML);
 						}
-						// 改为绿色渐变背景
 						copyBtn.style.background = 'linear-gradient(135deg, #00b894 0%, #00a085 100%)';
-						// 保留图标，文字改为“已复制!”
 						const originalSvg = copyBtn.querySelector('svg').outerHTML;
 						copyBtn.innerHTML = originalSvg + ' 已复制✨';
 
-						// 设置定时器恢复原状（2秒后）
 						copyTimer = setTimeout(() => {
-							copyBtn.style.background = ''; // 清除内联样式，恢复CSS默认
+							copyBtn.style.background = '';
 							copyBtn.innerHTML = copyBtn.getAttribute('data-original');
 							copyTimer = null;
 						}, 2000);
-					}).catch(err => {
+					}).catch(() => {
 						alert('复制失败，请手动复制');
 					});
 				}
@@ -612,21 +702,16 @@ async function githubInterface() {
 				function toSubmit(e) {
 					e.preventDefault();
 					const input = document.getElementsByName('q')[0];
-					const baseUrl = location.href.substr(0, location.href.lastIndexOf('/') + 1);
+					const baseUrl = window.location.origin + prefix;
 					window.open(baseUrl + input.value);
 				}
 
-				// 更新版权年份
 				document.getElementById('current-year').textContent = new Date().getFullYear();
 			</script>
 		</body>
 		</html>
 	`
 	return html
-}
-
-async function ADD(envadd) {
-	return envadd.split(',').map(s => s.trim()).filter(s => s.length > 0)
 }
 
 async function nginx() {
